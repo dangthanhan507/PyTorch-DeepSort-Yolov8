@@ -34,7 +34,6 @@ def bbox_to_state(bbox):
     
     return np.array([[cx,cy,s,r,0,0,0]]).T
 def state_to_bbox(state):
-    print(state)
     cx = state[0,0]
     cy = state[1,0]
     s  = state[2,0]
@@ -144,6 +143,7 @@ class SORT:
         
         #associate
         obj_matched, det_matched = self.hungarian(bboxes)
+        print('Found these matches: ', len(obj_matched))
         #any unmatched, just leave out....
         #perform update step 
         objs_new = []
@@ -189,6 +189,15 @@ class SORT:
             for meas_idx in range(n):
                 cost_matrix[pred_idx,meas_idx] = IOU(predicted_boxes[pred_idx], bboxes[meas_idx])
         
-        row_ind, col_ind = linear_sum_assignment(cost_matrix)
+        row_ind, col_ind = linear_sum_assignment(-cost_matrix)
+
+        obj_matched = []
+        det_matched = []
+        for i in range(len(row_ind)):
+            obj_idx = row_ind[i]
+            det_idx = col_ind[i]
+            if cost_matrix[obj_idx,det_idx] >= 100:
+                obj_matched.append(obj_idx)
+                det_matched.append(det_idx)
         
-        return row_ind.tolist(), col_ind.tolist()
+        return obj_matched, det_matched
