@@ -30,26 +30,29 @@ def bbox_to_state(bbox):
     cy = (yTL + yBR) / 2
     
     r = (xBR - xTL) / (yBR - yTL)
-    s = (xBR - xTL) * (yBR - yTL)
+    s = (yBR - yTL)
     
-    return np.array([[cx,cy,s,r,0,0,0,0]])
+    return np.array([[cx,cy,s,r,0,0,0]]).T
 def state_to_bbox(state):
-    cx = state[0]
-    cy = state[1]
-    s  = state[2]
-    r  = state[3]
+    print(state)
+    cx = state[0,0]
+    cy = state[1,0]
+    s  = state[2,0]
+    r  = state[3,0]
     
-    w  = np.sqrt(s*r)
+    w  = r*s
     h  = w/r
     
     xTL = cx - w/2
     xBR = cx + w/2
+
     yTL = cy - h/2
     yBR = cy + h/2
+
     return BBox(xTL,yTL,xBR,yBR,'unknown')
 
 def calc_velocity(curr_state, prev_state):
-    vel = curr_state[:4] - prev_state[:4]
+    vel = curr_state[:3] - prev_state[:3]
     return vel
 
 class KalmanFilter:
@@ -77,7 +80,7 @@ class KalmanFilter:
     def update(self, meas):
         K = self.cov @ self.C.T @ np.linalg.inv(self.C @ self.cov @ self.C.T + self.R)
         self.state  = self.state + K @ (meas - self.C @ self.state)
-        self.cov = (np.eye(self.cov.shape[0]) - self.K @ self.C) @ self.cov
+        self.cov = (np.eye(self.cov.shape[0]) - K @ self.C) @ self.cov
         
     def drawState(self, image):
         bbox = state_to_bbox(self.state)
@@ -115,35 +118,34 @@ class SORT:
                 -> subtract center points of both bboxes to get velocity
                 -> keep everything else as is in order to perform update step.
         '''
-        id_ctr = 0
-        objs = []
-        pass
+        self.id_ctr = 0
+        self.objs = []
+        
     def initialize_object(self, bbox):
         track_vector = bbox_to_state(bbox)
-        track_cov    = np.eye(8)
+        track_cov    = np.eye(7)
         
         #assign id
-        id_ = id_ctr
-        id_ctr += 1
+        id_ = self.id_ctr
+        self.id_ctr += 1
         
-        A = np.eye(8)
-        #first 4 rows, last 4 column
-        A[4:,:4] = np.eye(4)
+        A = np.eye(7)
+        #first 3 rows, last 3 column
+        A[:3,4:] = np.eye(3)
         
-        obj = KalmanFilter(A=A, C=np.eye(8), Q=np.eye(8), R=np.eye(8),obj_id=id_)
+        obj = KalmanFilter(A=A, C=np.eye(7), Q=np.eye(7), R=1e-3*np.eye(7),obj_id=id_)
         obj.initialize(track_vector, track_cov)
+        self.objs.append(obj)
         
     def track_boxes(self, bboxes):
-        
         #predict obj phase
         for obj in self.objs:
             obj.predict()        
         
         #associate
-        obj_matched, det_matched = hungarian(bboxes)
-        
+        obj_matched, det_matched = self.hungarian(bboxes)
         #any unmatched, just leave out....
-        #perform update step
+        #perform update step 
         objs_new = []
         for i in range(len(obj_matched)):
             obj_idx = obj_matched[i]
@@ -162,6 +164,10 @@ class SORT:
         for i in range(len(bboxes)):
             if i not in det_matched:
                 self.initialize_object(bboxes[i])
+    def drawTrack(self, image):
+        for obj in self.objs:
+            image = obj.drawState(image)
+        return image
         
     def hungarian(self, bboxes):
         '''
@@ -171,7 +177,7 @@ class SORT:
         '''
         predicted_boxes = []
         for obj in self.objs:
-            bbox = state_to_bbox(objs.state)
+            bbox = state_to_bbox(obj.state)
             predicted_boxes.append(bbox)
         
         #compare predicted boxes (rows) vs measured boxes (cols)
@@ -181,11 +187,8 @@ class SORT:
         cost_matrix = np.zeros((m,n))
         for pred_idx in range(m):
             for meas_idx in range(n):
-                cost_matrix[m,n] = IOU(predicted_boxes[pred_idx], bboxes[meas_idx])
+                cost_matrix[pred_idx,meas_idx] = IOU(predicted_boxes[pred_idx], bboxes[meas_idx])
         
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
         
-        objs_matched = row_ind.tolist()
-        detected_matched = col_ind.tolist()
-        
-        return row_ind, col_ind
+        return row_ind.tolist(), col_ind.tolist()
