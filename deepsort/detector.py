@@ -27,6 +27,8 @@ class BBox:
         self.y0 = y0
         self.y1 = y1
         self.name = name
+        # assert x1 - x0 != 0 and y1 - y0 != 0
+
     def getTL(self):
         # get topleft xy point of bounding box
         return (self.x0,self.y0)
@@ -54,6 +56,12 @@ class BBox:
         cv2.rectangle(image, (int(self.x0),int(self.y0)), (int(self.x1),int(self.y1)), (255,0,0))
         cv2.putText(image, self.name, (int(self.x0),int(self.y0)-12), 0, 1e-3*height, (255,0,0), thick//3)
         return image
+
+    def getImagePatch(self, image):
+        patch = image[int(self.y0): int(self.y1), int(self.x0): int(self.x1)]
+        # print(patch.shape, self.x0, self.x1)
+        assert patch.shape[0] != 0 and patch.shape[1] != 0
+        return patch
     
 class YoloDetector:
     def __init__(self, model_file):

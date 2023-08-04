@@ -1,13 +1,13 @@
 import cv2
 import torch
 
-from deepsort import DeepSort
+from deepsort import DeepSORT
 from detector import YoloDetector
 
 if __name__ == "__main__":
     detector = YoloDetector("yolov8n.pt") 
     device = torch.device("cpu")
-    deepsort = DeepSort()
+    deepsort = DeepSORT()
     cap = cv2.VideoCapture('test2.mp4')
 
     while cap.isOpened():
@@ -15,10 +15,12 @@ if __name__ == "__main__":
         frame = cv2.resize(frame, (1280, 720))
         if ret:
             bboxes = detector.eval(frame, filter_cls="car truck")
-            for bbox in bboxes:
-                deepsort.compare_with_last_frame(bbox, frame)
-
-            deepsort.set_last_frame_bboxes(bboxes)
+            # for bbox in bboxes:
+            #     deepsort.compare_with_last_frame(bbox, frame)
+            #
+            # deepsort.set_last_frame_bboxes(bboxes)
+            deepsort.track_boxes(bboxes, frame)
+            frame = deepsort.drawTrack(frame)
             cv2.imshow('frame', frame)
             if cv2.waitKey(25) & 0xFF == ord('q'):
                 break
