@@ -32,7 +32,7 @@ def bbox_to_state(bbox):
     r = (xBR - xTL) / (yBR - yTL)
     s = (yBR - yTL)
     
-    return np.array([[cx,cy,s,r,0,0,0]]).T
+    return np.array([[cx,cy,s,r,0,0,0,0]]).T
 def state_to_bbox(state):
     cx = state[0,0]
     cy = state[1,0]
@@ -51,7 +51,7 @@ def state_to_bbox(state):
     return BBox(xTL,yTL,xBR,yBR,'unknown')
 
 def calc_velocity(curr_state, prev_state):
-    vel = curr_state[:3] - prev_state[:3]
+    vel = curr_state[:4] - prev_state[:4]
     return vel
 
 class KalmanFilter:
@@ -122,17 +122,17 @@ class SORT:
         
     def initialize_object(self, bbox):
         track_vector = bbox_to_state(bbox)
-        track_cov    = np.eye(7)
+        track_cov    = np.eye(8)
         
         #assign id
         id_ = self.id_ctr
         self.id_ctr += 1
         
-        A = np.eye(7)
+        A = np.eye(8)
         #first 3 rows, last 3 column
-        A[:3,4:] = np.eye(3)
+        A[:4,4:] = np.eye(4)
         
-        obj = KalmanFilter(A=A, C=np.eye(7), Q=np.eye(7), R=1e-3*np.eye(7),obj_id=id_)
+        obj = KalmanFilter(A=A, C=np.eye(8), Q=np.eye(8), R=1e-3*np.eye(8),obj_id=id_)
         obj.initialize(track_vector, track_cov)
         self.objs.append(obj)
         
@@ -143,7 +143,6 @@ class SORT:
         
         #associate
         obj_matched, det_matched = self.hungarian(bboxes)
-        print('Found these matches: ', len(obj_matched))
         #any unmatched, just leave out....
         #perform update step 
         objs_new = []

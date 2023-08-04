@@ -76,7 +76,7 @@ class YoloDetector:
 
             box_ret: [BBox] returns list of BBox containing results
         '''
-        results = self.model.predict(image,conf=0.5)
+        results = self.model.predict(image,conf=0.7)
         box_ret = []
         '''
         Yolov8 NOTE:
