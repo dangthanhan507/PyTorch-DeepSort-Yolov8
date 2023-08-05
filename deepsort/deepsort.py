@@ -303,9 +303,17 @@ class DeepSORT:
             age_objs = [i for i in range(len(self.objs)) if self.objs[i].age == n]
             if len(age_objs) == 0:
                 continue
-            row_indices, col_indices = linear_sum_assignment(cost_matrix[age_objs][:,unmatched_dets])
+            age_cost_matrix = cost_matrix[age_objs][:,unmatched_dets]
+            print("Len of age objs:", len(age_objs))
+            print("Age cost matrix shape:", age_cost_matrix.shape)
+            row_indices, col_indices = linear_sum_assignment(age_cost_matrix)
+            print("HA:", len(row_indices), len(col_indices))
+            print(row_indices)
+            print(col_indices)
             row_map = {row_indices[i]: age_objs[i] for i in range(len(row_indices))}
             col_map = {col_indices[i]: unmatched_dets[i] for i in range(len(col_indices))}
+            # assert row_indices.shape[0] == age_cost_matrix.shape[0], f"{row_indices.shape[0]} vs {age_cost_matrix.shape[0]}"
+            # assert col_indices.shape[0] == age_cost_matrix.shape[1], f"{col_indices.shape[0]} vs {age_cost_matrix.shape[1]}"
 
             count = 0
             all_rows = [row_map[r] for r in row_indices]
@@ -317,16 +325,12 @@ class DeepSORT:
                         obj_matches.append(i)
                         det_matches.append(j)
                         count += 1
-                if gate_matrix[all_rows,j].sum() > 0:
+                gate_matrix_sum = gate_matrix[all_rows,j].sum()
+                print(f"For col {j}, sum is", gate_matrix_sum)
+                if gate_matrix_sum > 0:
                     unmatched_dets.remove(j)
             print(f"matched {count} for age {n}")
                  
-        obj_matches = obj_matches
-        det_matches = det_matches
-        # print(len(self.objs))
-        # print(obj_matches)
-        # print(det_matches)
-        # input()
         print("Unmatched:", len(unmatched_dets), unmatched_dets)
         return obj_matches, det_matches, [bboxes[i] for i in unmatched_dets], unmatched_dets
 
