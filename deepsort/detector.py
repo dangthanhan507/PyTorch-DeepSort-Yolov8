@@ -58,8 +58,19 @@ class BBox:
         return image
 
     def getImagePatch(self, image):
-        patch = image[int(self.y0): int(self.y1), int(self.x0): int(self.x1)]
-        # print(patch.shape, self.x0, self.x1)
+        y0, y1 = int(self.y0), int(self.y1)
+        x0, x1 = int(self.x0), int(self.x1)
+
+        y0 = max(y0, 0)
+        y0 = min(y0, image.shape[0])
+        y1 = min(y1, image.shape[0])
+        y1 = max(0, y1)
+
+        x0 = max(x0, 0)
+        x0 = min(x0, image.shape[1])
+        x1 = min(x1, image.shape[1])
+        x1 = max(0, x1)
+        patch = image[y0: y1, x0:x1]
         assert patch.shape[0] != 0 and patch.shape[1] != 0
         return patch
     
@@ -85,7 +96,7 @@ class YoloDetector:
 
             box_ret: [BBox] returns list of BBox containing results
         '''
-        results = self.model.predict(image,conf=0.5)
+        results = self.model.predict(image,conf=0.6)
         box_ret = []
         '''
         Yolov8 NOTE:

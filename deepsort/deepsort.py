@@ -134,7 +134,7 @@ class DeepSORT:
         '''
         self.id_ctr = 0
         self.objs = []
-        self.conf = 0.95 # confidence interval??
+        self.conf = 1 # confidence interval??
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.siamese_net = torch.load("ckpts/model640.pt", map_location=device).eval()
@@ -144,7 +144,7 @@ class DeepSORT:
         ])
         self.gate_matrix_thresh1 = 9.4877
         self.gate_matrix_thresh2 = 0.85
-        self.MAX_AGE = 20
+        self.MAX_AGE = 30
         
     def initialize_object(self, bbox):
         track_vector = bbox_to_state(bbox)
@@ -164,12 +164,20 @@ class DeepSORT:
         self.objs.append(obj)
         
     def track_boxes(self, bboxes, image):
+        print("-------------------")
         #predict obj phase
         for obj in self.objs:
             obj.predict()        
         
         #associate
         obj_matched, det_matched, unmatched = self.matching_cascade(bboxes, image)
+        print(f"Before iou matching, len of obj_matched is {len(obj_matched)}")
+        obj_matched_2, det_matched_2 = self.hungarian(unmatched)
+        for i in range(len(obj_matched_2)):
+            if obj_matched_2[i] not in obj_matched:
+                print(f"Matching undetected {i}")
+                obj_matched.append(obj_matched_2[i])
+                det_matched.append(det_matched_2[i])
         print('Found these matches: ', len(obj_matched))
         
         #any unmatched, just leave out....
@@ -183,13 +191,14 @@ class DeepSORT:
             det[4:] = calc_velocity(det, self.objs[obj_idx].state)
             
             self.objs[obj_idx].update(det)
+            self.objs[obj_idx].last_age_matched = self.objs[obj_idx].age
             objs_new.append(self.objs[obj_idx])
 
 
         # remove any unmatched
         for obj in self.objs:
             if obj not in objs_new \
-                    and not (obj.age == 3 and obj.last_age_matched == -1) \
+                    and not (obj.age == 2 and obj.last_age_matched == -1) \
                     and not (obj.age - obj.last_age_matched >= self.MAX_AGE):
                 objs_new.append(obj)
         
@@ -197,9 +206,11 @@ class DeepSORT:
         self.objs = objs_new
         
         #initialize any unmatched detections as a new track
+        print(f"det matched:", det_matched)
         for i in range(len(bboxes)):
             if i not in det_matched:
                 self.initialize_object(bboxes[i])
+        print(f"Current num of objs is {len(self.objs)}")
 
         # update age
         for i in self.objs:
@@ -254,7 +265,8 @@ class DeepSORT:
         n = len(bboxes)
         cost_matrix = np.zeros((m, n))
         d1_matrix = np.zeros((m, n))
-        d2_matrix = np.zeros((m, n))
+        # d2_matrix = np.ones((m, n))
+        # d2_matrix = np.zeros((m, n))
         for pred_idx in range(m):
             for meas_idx in range(n):
                 d1 = self.mahalanobis(
@@ -262,22 +274,14 @@ class DeepSORT:
                         bboxes[meas_idx], 
                         self.objs[pred_idx])
                 d1_matrix[pred_idx, meas_idx] = d1
-                # print("d2 predicted boxes:", predicted_boxes[pred_idx].x0, predicted_boxes[pred_idx].x1)
-                d2 = self.cosine_distance(
-                        predicted_boxes[pred_idx].getImagePatch(image), 
-                        bboxes[meas_idx].getImagePatch(image))
-                # if d1 < self.gate_matrix_thresh1:
-                #     print("Mahalanobis dist is good!!!")
-                # if d2 < self.gate_matrix_thresh2:
-                #     print("Cosine dist is good!!!")
-                # print(f"{pred_idx} {meas_idx}")
-                # print("Mahalanobis:", d1)
-                # print("cosine:", d2)
-                # print("--------------")
-                # if d1 <= self.gate_matrix_thresh1 and d2 <= self.gate_matrix_thresh2:
-                #     print("this gate matrix should be a 1 here")
-                d2_matrix[pred_idx, meas_idx] = d2
-                dist_measurement = self.conf * d1 + (1 - self.conf) * d2
+                # try:
+                #     d2 = self.cosine_distance(
+                #             predicted_boxes[pred_idx].getImagePatch(image), 
+                #             bboxes[meas_idx].getImagePatch(image))
+                # except Exception:
+                #     d2 = 0
+                # d2_matrix[pred_idx, meas_idx] = d2
+                dist_measurement = self.conf * d1 # + (1 - self.conf) * d2
                 cost_matrix[pred_idx, meas_idx] = dist_measurement
 
         # create gate matrix
@@ -285,31 +289,44 @@ class DeepSORT:
         for pred_idx in range(m):
             for meas_idx in range(n):
                 d1 = int(d1_matrix[pred_idx, meas_idx] <= self.gate_matrix_thresh1)
-                d2 = int(d2_matrix[pred_idx, meas_idx] >= self.gate_matrix_thresh2)
-                gate_matrix[pred_idx, meas_idx] = d1 * d2 
+                # d2 = int(d2_matrix[pred_idx, meas_idx] >= self.gate_matrix_thresh2)
+                gate_matrix[pred_idx, meas_idx] = d1 # * d2 
 
-        row_indices, col_indices = linear_sum_assignment(cost_matrix)
-        obj_matches = set()
-        det_matches = set() 
+        obj_matches = [] 
+        det_matches = [] 
         unmatched_dets = [i for i in range(len(bboxes))] 
-        # print("-------------")
-        # print("GATE_MATRIX:")
-        # print(gate_matrix)
-        # print("-------------")
-        for i in row_indices:
-            for j in col_indices:
-                # if self.objs[i].age > MAX_AGE:
-                #     continue
+        print("Before matching, len of unmatched_dets is ", len(unmatched_dets))
 
-                if gate_matrix[i,j] > 0:
-                    obj_matches.add(i)
-                    det_matches.add(j)
-            if gate_matrix[i,col_indices].sum() > 0:
-                unmatched_dets[j] = None
+        for n in range(1, self.MAX_AGE):
+            age_objs = [i for i in range(len(self.objs)) if self.objs[i].age == n]
+            if len(age_objs) == 0:
+                continue
+            row_indices, col_indices = linear_sum_assignment(cost_matrix[age_objs][:,unmatched_dets])
+            row_map = {row_indices[i]: age_objs[i] for i in range(len(row_indices))}
+            col_map = {col_indices[i]: unmatched_dets[i] for i in range(len(col_indices))}
+
+            count = 0
+            all_rows = [row_map[r] for r in row_indices]
+            for c in col_indices:
+                j = col_map[c]
+                for r in row_indices:
+                    i = row_map[r] 
+                    if gate_matrix[i,j] > 0:
+                        obj_matches.append(i)
+                        det_matches.append(j)
+                        count += 1
+                if gate_matrix[all_rows,j].sum() > 0:
+                    unmatched_dets.remove(j)
+            print(f"matched {count} for age {n}")
                  
-        obj_matches = list(obj_matches)
-        det_matches = list(det_matches)
-        return obj_matches, det_matches, [ i for i in unmatched_dets if i != None ]
+        obj_matches = obj_matches
+        det_matches = det_matches
+        # print(len(self.objs))
+        # print(obj_matches)
+        # print(det_matches)
+        # input()
+        print("Unmatched:", len(unmatched_dets), unmatched_dets)
+        return obj_matches, det_matches, [bboxes[i] for i in unmatched_dets]
 
 
     def mahalanobis(self, predicted_bbox, bbox, obj):
@@ -321,7 +338,6 @@ class DeepSORT:
 
     # this is good
     def cosine_distance(self, predicted_bbox, bbox):
-        print(predicted_bbox.shape)
         patch1 = self.transform(predicted_bbox).unsqueeze(0)
         patch2 = self.transform(bbox).unsqueeze(0)
         
