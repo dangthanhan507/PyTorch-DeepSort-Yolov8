@@ -170,9 +170,9 @@ class DeepSORT:
             obj.predict()        
         
         #associate
-        obj_matched, det_matched, unmatched = self.matching_cascade(bboxes, image)
+        obj_matched, det_matched, unmatched, unmatched_indices = self.matching_cascade(bboxes, image)
         print(f"Before iou matching, len of obj_matched is {len(obj_matched)}")
-        obj_matched_2, det_matched_2 = self.hungarian(unmatched)
+        obj_matched_2, det_matched_2 = self.hungarian(unmatched, unmatched_indices)
         for i in range(len(obj_matched_2)):
             if obj_matched_2[i] not in obj_matched:
                 print(f"Matching undetected {i}")
@@ -221,7 +221,7 @@ class DeepSORT:
             image = obj.drawState(image)
         return image
         
-    def hungarian(self, bboxes):
+    def hungarian(self, bboxes, original_indices):
         '''
         In order to run hungarian, we create a cost matrix by hand.
         Then we run it through a solver to find the best solution.
@@ -252,6 +252,8 @@ class DeepSORT:
                 obj_matched.append(obj_idx)
                 det_matched.append(det_idx)
         
+        for i in range(len(det_matched)):
+            det_matched[i] = original_indices[i]
         return obj_matched, det_matched
 
     def matching_cascade(self, bboxes, image):
@@ -281,7 +283,7 @@ class DeepSORT:
                 # except Exception:
                 #     d2 = 0
                 # d2_matrix[pred_idx, meas_idx] = d2
-                dist_measurement = self.conf * d1 # + (1 - self.conf) * d2
+                dist_measurement = self.conf * d1 #+ (1 - self.conf) * d2
                 cost_matrix[pred_idx, meas_idx] = dist_measurement
 
         # create gate matrix
@@ -290,7 +292,7 @@ class DeepSORT:
             for meas_idx in range(n):
                 d1 = int(d1_matrix[pred_idx, meas_idx] <= self.gate_matrix_thresh1)
                 # d2 = int(d2_matrix[pred_idx, meas_idx] >= self.gate_matrix_thresh2)
-                gate_matrix[pred_idx, meas_idx] = d1 # * d2 
+                gate_matrix[pred_idx, meas_idx] = d1 #* d2 
 
         obj_matches = [] 
         det_matches = [] 
@@ -326,7 +328,7 @@ class DeepSORT:
         # print(det_matches)
         # input()
         print("Unmatched:", len(unmatched_dets), unmatched_dets)
-        return obj_matches, det_matches, [bboxes[i] for i in unmatched_dets]
+        return obj_matches, det_matches, [bboxes[i] for i in unmatched_dets], unmatched_dets
 
 
     def mahalanobis(self, predicted_bbox, bbox, obj):
