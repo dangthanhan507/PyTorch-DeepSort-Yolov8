@@ -100,6 +100,10 @@ class KalmanFilter:
         cv2.putText(image, bbox.name, (int(bbox.x0),int(bbox.y0)-12), 0, 1e-3*height, (255,0,0), thick//3)
         return image
 
+    def getAllCorners(self):
+        bbox = state_to_bbox(self.state)
+        return bbox.getAllCorners()
+
 class TrackObj(KalmanFilter):
     def __init__(self, A, C, Q, R, obj_id=0, age=0, is_matched_before=False):
         super().__init__(A, C, Q, R, obj_id) 
@@ -142,7 +146,7 @@ class DeepSORT:
             T.ToTensor(),
             T.Resize((128, 128))
         ])
-        self.gate_matrix_thresh1 = 9.4877
+        self.gate_matrix_thresh1 = 500
         self.gate_matrix_thresh2 = 0.85
         self.MAX_AGE = 30
         
@@ -159,7 +163,7 @@ class DeepSORT:
         #first 3 rows, last 3 column
         A[:3,4:] = np.eye(3)
         
-        obj = TrackObj(A=A, C=np.eye(7), Q=np.eye(7), R=1e-3*np.eye(7),obj_id=id_)
+        obj = TrackObj(A=A, C=np.eye(7), Q=np.eye(7), R=1e-7*np.eye(7),obj_id=id_)
         obj.initialize(track_vector, track_cov)
         self.objs.append(obj)
         
@@ -169,6 +173,7 @@ class DeepSORT:
         for obj in self.objs:
             obj.predict()        
         
+        # tentative frames, redo that bc rn it's just becomes affirmative as soon as it's detected
         #associate
         obj_matched, det_matched, unmatched, unmatched_indices = self.matching_cascade(bboxes, image)
         print(f"Before iou matching, len of obj_matched is {len(obj_matched)}")
@@ -200,7 +205,7 @@ class DeepSORT:
         for obj in self.objs:
             if obj not in objs_new \
                     and not (obj.age == 2 and not obj.is_matched_before) \
-                    and not (obj.age > self.MAX_AGE):
+                    and not (obj.age > self.MAX_AGE and obj.is_matched_before):
                 objs_new.append(obj)
         
         #filter only objects that got tracked
@@ -277,6 +282,10 @@ class DeepSORT:
                         bboxes[meas_idx], 
                         self.objs[pred_idx])
                 d1_matrix[pred_idx, meas_idx] = d1
+
+                e_dist = np.sum((np.array(predicted_boxes[pred_idx].getAllCorners()) - np.array(bboxes[meas_idx].getAllCorners()))**2)
+                if e_dist < 50:
+                    print(f"It is plausible to have a match between track {pred_idx} & det {meas_idx}")
                 # try:
                 #     d2 = self.cosine_distance(
                 #             predicted_boxes[pred_idx].getImagePatch(image), 
@@ -309,12 +318,10 @@ class DeepSORT:
             print("Age cost matrix shape:", age_cost_matrix.shape)
             row_indices, col_indices = linear_sum_assignment(age_cost_matrix)
             print("HA:", len(row_indices), len(col_indices))
-            print(row_indices)
-            print(col_indices)
+            print("Row indices:", row_indices)
+            print("Col indices:", col_indices)
             row_map = {row_indices[i]: age_objs[i] for i in range(len(row_indices))}
             col_map = {col_indices[i]: unmatched_dets[i] for i in range(len(col_indices))}
-            # assert row_indices.shape[0] == age_cost_matrix.shape[0], f"{row_indices.shape[0]} vs {age_cost_matrix.shape[0]}"
-            # assert col_indices.shape[0] == age_cost_matrix.shape[1], f"{col_indices.shape[0]} vs {age_cost_matrix.shape[1]}"
 
             count = 0
             all_rows = [row_map[r] for r in row_indices]
@@ -322,7 +329,12 @@ class DeepSORT:
                 j = col_map[c]
                 for r in row_indices:
                     i = row_map[r] 
+                    print("Corners:")
+                    print(f"| {self.objs[i].getAllCorners()} |")
+                    print(f"| {bboxes[j].getAllCorners()} |")
+                    print(f"| {cost_matrix[i,j]} |")
                     if gate_matrix[i,j] > 0:
+                        print("^^^ Found a match, look at the corners above ^^^") 
                         obj_matches.append(i)
                         det_matches.append(j)
                         count += 1
@@ -332,6 +344,8 @@ class DeepSORT:
                     unmatched_dets.remove(j)
             print(f"matched {count} for age {n}")
                  
+        print("Obj matches:", len(obj_matches), obj_matches)
+        print("Detected:", len(det_matches), det_matches)
         print("Unmatched:", len(unmatched_dets), unmatched_dets)
         return obj_matches, det_matches, [bboxes[i] for i in unmatched_dets], unmatched_dets
 
