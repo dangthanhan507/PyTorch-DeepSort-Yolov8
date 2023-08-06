@@ -101,9 +101,9 @@ class KalmanFilter:
         return image
 
 class TrackObj(KalmanFilter):
-    def __init__(self, A, C, Q, R, obj_id=0, age=0, matched_before=-1):
+    def __init__(self, A, C, Q, R, obj_id=0, age=0, is_matched_before=False):
         super().__init__(A, C, Q, R, obj_id) 
-        self.last_age_matched = matched_before
+        self.is_matched_before  = is_matched_before 
         self.age = age 
     
 class DeepSORT:
@@ -134,7 +134,7 @@ class DeepSORT:
         '''
         self.id_ctr = 0
         self.objs = []
-        self.conf = 1 # confidence interval??
+        self.conf = 0.95 # confidence interval??
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.siamese_net = torch.load("ckpts/model640.pt", map_location=device).eval()
@@ -191,15 +191,16 @@ class DeepSORT:
             det[4:] = calc_velocity(det, self.objs[obj_idx].state)
             
             self.objs[obj_idx].update(det)
-            self.objs[obj_idx].last_age_matched = self.objs[obj_idx].age
+            self.objs[obj_idx].is_matched_before = True 
+            self.objs[obj_idx].age = 0
             objs_new.append(self.objs[obj_idx])
 
 
         # remove any unmatched
         for obj in self.objs:
             if obj not in objs_new \
-                    and not (obj.age == 2 and obj.last_age_matched == -1) \
-                    and not (obj.age - obj.last_age_matched >= self.MAX_AGE):
+                    and not (obj.age == 2 and not obj.is_matched_before) \
+                    and not (obj.age > self.MAX_AGE):
                 objs_new.append(obj)
         
         #filter only objects that got tracked
@@ -299,7 +300,7 @@ class DeepSORT:
         unmatched_dets = [i for i in range(len(bboxes))] 
         print("Before matching, len of unmatched_dets is ", len(unmatched_dets))
 
-        for n in range(1, self.MAX_AGE):
+        for n in range(1, self.MAX_AGE + 1):
             age_objs = [i for i in range(len(self.objs)) if self.objs[i].age == n]
             if len(age_objs) == 0:
                 continue
